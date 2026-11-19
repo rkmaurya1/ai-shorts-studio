@@ -118,49 +118,80 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
     
     env = os.environ.copy()
     env["PYTHONWARNINGS"] = "ignore"
-    
     python_bin = sys.executable or "python3"
     
-    # First get metadata
-    info_cmd = [
-        python_bin, "-m", "yt_dlp",
-        "--dump-json",
-        "--no-warnings",
-        "--extractor-args", "youtube:player_client=android,web",
-        clean_url
+    # Modern mobile user-agent to bypass cloud/datacenter bot blocks
+    user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+
+    # Multi-client strategy: iOS client bypasses YouTube 403 Forbidden on AWS/Streamlit Cloud
+    client_strategies = [
+        {"client": "ios,mweb", "fmt": "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"},
+        {"client": "mweb,android_vr", "fmt": "18/best[ext=mp4]/best"},
+        {"client": "android,web", "fmt": "best[ext=mp4]/best"}
     ]
-    p_info = subprocess.run(info_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-    if p_info.returncode != 0:
-        raise RuntimeError(f"Failed to fetch video metadata: {p_info.stderr}")
-    
-    # Parse last json line in case of any preamble
-    raw_out = p_info.stdout.strip()
-    json_str = None
-    for line in reversed(raw_out.split('\n')):
-        if line.strip().startswith('{') and line.strip().endswith('}'):
-            json_str = line.strip()
-            break
-    if not json_str:
-        json_str = raw_out
-        
-    info = json.loads(json_str)
+
+    info = None
+    last_err = None
+
+    # Step 1: Fetch Video Metadata
+    for strat in client_strategies:
+        info_cmd = [
+            python_bin, "-m", "yt_dlp",
+            "--dump-json",
+            "--no-warnings",
+            "--user-agent", user_agent,
+            "--extractor-args", f"youtube:player_client={strat['client']}",
+            clean_url
+        ]
+        p_info = subprocess.run(info_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        if p_info.returncode == 0:
+            raw_out = p_info.stdout.strip()
+            json_str = None
+            for line in reversed(raw_out.split('\n')):
+                if line.strip().startswith('{') and line.strip().endswith('}'):
+                    json_str = line.strip()
+                    break
+            if not json_str:
+                json_str = raw_out
+            try:
+                info = json.loads(json_str)
+                break
+            except Exception:
+                pass
+        else:
+            last_err = p_info.stderr
+
+    if not info:
+        raise RuntimeError(f"Failed to fetch video metadata: {last_err}")
+
     video_id = info.get("id")
     video_path = os.path.join(output_dir, f"{video_id}.mp4")
-    
+
+    # Step 2: Download Video Data
     if not os.path.exists(video_path):
         if progress_callback:
             progress_callback(f"Downloading: {info.get('title')}...")
-        dl_cmd = [
-            python_bin, "-m", "yt_dlp",
-            "-f", "18/best[ext=mp4]/best",
-            "--no-warnings",
-            "--extractor-args", "youtube:player_client=android,web",
-            "-o", video_path,
-            clean_url
-        ]
-        p_dl = subprocess.run(dl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-        if p_dl.returncode != 0:
-            raise RuntimeError(f"Download failed: {p_dl.stderr}")
+        
+        download_success = False
+        for strat in client_strategies:
+            dl_cmd = [
+                python_bin, "-m", "yt_dlp",
+                "-f", strat["fmt"],
+                "--no-warnings",
+                "--user-agent", user_agent,
+                "--extractor-args", f"youtube:player_client={strat['client']}",
+                "-o", video_path,
+                clean_url
+            ]
+            p_dl = subprocess.run(dl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            if p_dl.returncode == 0 and os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
+                download_success = True
+                break
+            else:
+                last_err = p_dl.stderr
+        
+        if not download_success:
+            raise RuntimeError(f"Download failed: {last_err}")
             
     return video_path, info
 
