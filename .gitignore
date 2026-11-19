@@ -1,0 +1,14 @@
+# Streamlit & Python ignores
+__pycache__/
+*.pyc
+.DS_Store
+downloads/
+output_shorts/
+temp_overlays/
+*.mp4
+*.wav
+*.png
+*.jpg
+hf_space/
+run.sh
+video ai agent /
