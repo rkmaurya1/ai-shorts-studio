@@ -17,8 +17,15 @@ from shorts_engine import (
     generate_ambient_beat,
     create_overlay_png,
     render_short_video,
-    generate_rich_clip_metadata
+    generate_rich_clip_metadata,
+    cleanup_old_files
 )
+
+# Auto-delete files older than 24 hours to keep storage free (₹0 bill forever)
+try:
+    cleanup_old_files(max_age_hours=24)
+except Exception:
+    pass
 
 st.set_page_config(
     page_title="AI Shorts Studio Pro",
@@ -196,6 +203,7 @@ st.markdown("""
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <span class="badge-status">● Engine Online</span>
         <span class="shield-badge">🛡️ Content ID Shield Active</span>
+        <span class="shield-badge" style="background: rgba(163, 113, 247, 0.15); color: #d2a8ff; border-color: rgba(163, 113, 247, 0.3);">⏳ 24h Auto-Clean Active</span>
     </div>
 </div>
 """, unsafe_allow_html=True)

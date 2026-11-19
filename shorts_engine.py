@@ -19,6 +19,24 @@ FONT_HELVETICA = "/System/Library/Fonts/Helvetica.ttc"
 def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>| ]', '_', name)
 
+def cleanup_old_files(directories=None, max_age_hours=24):
+    """Deletes generated videos and temp files older than max_age_hours to save storage."""
+    if directories is None:
+        directories = ["output_shorts", "downloads", "temp_overlays"]
+    import time
+    now = time.time()
+    cutoff = now - (max_age_hours * 3600)
+    for d in directories:
+        if os.path.exists(d):
+            for filename in os.listdir(d):
+                filepath = os.path.join(d, filename)
+                try:
+                    if os.path.isfile(filepath) and not filename.startswith("."):
+                        if os.path.getmtime(filepath) < cutoff:
+                            os.remove(filepath)
+                except Exception:
+                    pass
+
 def get_font(path, size):
     if path and os.path.exists(path):
         try:
