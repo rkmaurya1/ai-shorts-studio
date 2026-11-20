@@ -7,7 +7,7 @@ import json
 import traceback
 
 st.set_page_config(
-    page_title="AI Shorts Studio Pro",
+    page_title="AI Shorts Studio Pro+",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -234,7 +234,7 @@ with st.sidebar:
     shield_preset = st.selectbox(
         "Shield Level",
         [
-            "🛡️ Ultra Anti-Claim Shield (Recommended)",
+            "🛡️ Ultra Anti-Claim Shieldss (Recommended)",
             "🔇 Music-Mute Shield (Zero Song Claim)",
             "🎙️ Voice Only (No BGM Beat)",
             "⚙️ Custom Settings"
