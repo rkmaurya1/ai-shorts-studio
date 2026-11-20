@@ -195,13 +195,27 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
     env["PYTHONWARNINGS"] = "ignore"
     python_bin = sys.executable or "python3"
     
-    # Android client bypasses YouTube BotGuard, SABR streaming & 403 Forbidden on AWS / Streamlit Cloud
+    # Priority strategy: Android client with universal format 18 completely bypasses
+    # YouTube BotGuard, SABR streaming & 403 Forbidden on AWS / Streamlit Cloud without PO-Token
     client_strategies = [
+        {"client": "android", "fmt": "18/best[ext=mp4]/best"},
         {"client": "android", "fmt": "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"},
-        {"client": "android", "fmt": "18/best"},
-        {"client": "android_vr", "fmt": "best[ext=mp4]/best"},
-        {"client": "android,web", "fmt": "best"}
+        {"client": "android_vr", "fmt": "18/best"},
+        {"client": "web,mweb", "fmt": "best"}
     ]
+
+    # Check for optional cookies in Streamlit Secrets or local cookies.txt
+    cookie_path = None
+    try:
+        import streamlit as st
+        if "YOUTUBE_COOKIES" in st.secrets and len(st.secrets["YOUTUBE_COOKIES"].strip()) > 20:
+            cookie_path = os.path.join(output_dir, "cloud_cookies.txt")
+            with open(cookie_path, "w") as f:
+                f.write(st.secrets["YOUTUBE_COOKIES"])
+    except Exception:
+        pass
+    if not cookie_path and os.path.exists("cookies.txt"):
+        cookie_path = "cookies.txt"
 
     info = None
     last_err = None
@@ -217,6 +231,9 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
             "--extractor-args", f"youtube:player_client={strat['client']}",
             clean_url
         ]
+        if cookie_path and strat['client'] != "android":
+            info_cmd.extend(["--cookies", cookie_path])
+
         p_info = subprocess.run(info_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         if p_info.returncode == 0:
             raw_out = p_info.stdout.strip()
@@ -258,6 +275,9 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
                 "-o", video_path,
                 clean_url
             ]
+            if cookie_path and strat['client'] != "android":
+                dl_cmd.extend(["--cookies", cookie_path])
+
             p_dl = subprocess.run(dl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
             if p_dl.returncode == 0 and os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
                 download_success = True
