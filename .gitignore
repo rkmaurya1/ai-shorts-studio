@@ -12,3 +12,6 @@ temp_overlays/
 hf_space/
 run.sh
 video ai agent /
+cookies.txt
+mobile_app/
+*.apk

@@ -286,9 +286,40 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
                 last_err = p_dl.stderr
         
         if not download_success:
+            err_str = str(last_err)
+            if "Sign in to confirm you’re not a bot" in err_str or "Sign in to confirm you're not a bot" in err_str or "403" in err_str:
+                raise RuntimeError(
+                    "YouTube Bot Protection Active: Cloud server (AWS) ka IP YouTube ne bot samajh kar block kiya hai.\n"
+                    "💡 Solution: Kripya '📁 Upload Video File' tab se video file select karein, ya Local App / Wi-Fi use karein!"
+                )
             raise RuntimeError(f"Download failed: {last_err}")
             
     return video_path, info
+
+def get_local_video_info(video_path, custom_title=None):
+    """Extracts duration and metadata from a local or uploaded video file."""
+    duration = 300.0
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            duration = float(res.stdout.strip())
+    except Exception:
+        pass
+        
+    base_name = os.path.splitext(os.path.basename(video_path))[0]
+    title = custom_title if custom_title else base_name.replace("_", " ").replace("-", " ").title()
+    return {
+        "id": base_name,
+        "title": title,
+        "duration": duration,
+        "description": f"Uploaded video: {title}"
+    }
 
 def sanitize_hook_text(text):
     """Sanitizes text to remove episode numbers or official copyright patterns."""

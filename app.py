@@ -22,6 +22,7 @@ os.chdir(APP_DIR)
 try:
     from shorts_engine import (
         download_youtube_video,
+        get_local_video_info,
         select_clip_moments,
         generate_ambient_beat,
         create_overlay_png,
@@ -277,99 +278,135 @@ with st.sidebar:
 # Main Input Section
 with st.container():
     st.markdown('<div class="saas-card">', unsafe_allow_html=True)
-    st.markdown("<h4 style='margin-top:0; font-size:1.05rem; font-weight:700;'>🎬 Enter YouTube Video Link</h4>", unsafe_allow_html=True)
     
-    col1, col2 = st.columns([3.8, 1.2])
-    with col1:
-        youtube_url = st.text_input(
-            "YouTube Video Link",
-            label_visibility="collapsed",
-            placeholder="Paste link e.g. https://youtu.be/OV2d3EilpPw",
-            value=""
-        )
-    with col2:
-        start_btn = st.button("🚀 Generate Shorts", use_container_width=True)
+    input_tab1, input_tab2 = st.tabs(["🔗 YouTube Link", "📁 Upload Video File (Phone / PC)"])
+    
+    with input_tab1:
+        st.markdown("<h4 style='margin-top:0; font-size:1.02rem; font-weight:700;'>🎬 Enter YouTube Video Link</h4>", unsafe_allow_html=True)
+        col1, col2 = st.columns([3.8, 1.2])
+        with col1:
+            youtube_url = st.text_input(
+                "YouTube Video Link",
+                label_visibility="collapsed",
+                placeholder="Paste link e.g. https://youtu.be/OV2d3EilpPw",
+                value="",
+                key="yt_url_field"
+            )
+        with col2:
+            start_btn_url = st.button("🚀 Generate Shorts", key="btn_yt_url", use_container_width=True)
+            
+        st.markdown("""
+        <div style="margin-top: 6px;">
+            <span style="color: #8b949e; font-size: 0.78rem;">💡 Quick Links: </span>
+            <code style="font-size: 0.74rem; background: #0d1117; padding: 2px 6px; border-radius: 4px;">https://youtu.be/OV2d3EilpPw</code>
+            <code style="font-size: 0.74rem; background: #0d1117; padding: 2px 6px; border-radius: 4px;">https://youtu.be/kI_hRuzVbtU</code>
+        </div>
+        """, unsafe_allow_html=True)
         
-    st.markdown("""
-    <div style="margin-top: 6px;">
-        <span style="color: #8b949e; font-size: 0.78rem;">💡 Quick Links: </span>
-        <code style="font-size: 0.74rem; background: #0d1117; padding: 2px 6px; border-radius: 4px;">https://youtu.be/OV2d3EilpPw</code>
-        <code style="font-size: 0.74rem; background: #0d1117; padding: 2px 6px; border-radius: 4px;">https://youtu.be/kI_hRuzVbtU</code>
-    </div>
-    """, unsafe_allow_html=True)
+    with input_tab2:
+        st.markdown("<h4 style='margin-top:0; font-size:1.02rem; font-weight:700;'>📁 Upload Video from Phone or PC (100% Bot-Free)</h4>", unsafe_allow_html=True)
+        st.caption("Phone gallery ya PC se video select karein. Koi YouTube IP block ya bot error nahi aayega!")
+        uploaded_video = st.file_uploader("Select Video", type=["mp4", "mov", "mkv", "webm"], label_visibility="collapsed")
+        start_btn_upload = st.button("🚀 Process Uploaded Video", key="btn_upload_vid", use_container_width=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 output_folder = "output_shorts"
 os.makedirs(output_folder, exist_ok=True)
 os.makedirs("temp_overlays", exist_ok=True)
+os.makedirs("downloads", exist_ok=True)
 
-# Video Processing Pipeline
-if start_btn:
+# Determine pipeline trigger
+trigger_pipeline = False
+input_source_type = None
+
+if start_btn_url:
     if not youtube_url.strip():
         st.warning("⚠️ Kripya ek YouTube video link enter kijiye!")
     else:
-        status_box = st.status("🎬 Processing Video...", expanded=True)
-        
-        try:
+        trigger_pipeline = True
+        input_source_type = "url"
+
+elif start_btn_upload:
+    if not uploaded_video:
+        st.warning("⚠️ Kripya pehle video file select ya upload kijiye!")
+    else:
+        trigger_pipeline = True
+        input_source_type = "upload"
+
+# Video Processing Pipeline
+if trigger_pipeline:
+    status_box = st.status("🎬 Processing Video...", expanded=True)
+    
+    try:
+        if input_source_type == "url":
             status_box.write("📥 Step 1/4: Video download ho raha hai...")
             video_path, info = download_youtube_video(youtube_url)
             status_box.write(f"✅ Video Downloaded: **{info.get('title')}**")
+        else:
+            status_box.write("📥 Step 1/4: Uploaded video file prepare ho rahi hai...")
+            saved_name = f"uploaded_{int(time.time())}_{uploaded_video.name}"
+            video_path = os.path.join("downloads", saved_name)
+            with open(video_path, "wb") as uf:
+                uf.write(uploaded_video.getbuffer())
+            info = get_local_video_info(video_path, custom_title=uploaded_video.name)
+            status_box.write(f"✅ Video Loaded: **{info.get('title')}** ({int(info.get('duration', 0))}s)")
 
-            status_box.write("🎯 Step 2/4: Viral moments aur timestamps select ho rahe hain...")
-            clips = select_clip_moments(info, num_shorts=num_shorts, target_duration=target_duration, gemini_api_key=gemini_key)
-            status_box.write(f"✅ {len(clips)} Viral Segments Identified!")
+        status_box.write("🎯 Step 2/4: Viral moments aur timestamps select ho rahe hain...")
+        clips = select_clip_moments(info, num_shorts=num_shorts, target_duration=target_duration, gemini_api_key=gemini_key)
+        status_box.write(f"✅ {len(clips)} Viral Segments Identified!")
 
-            status_box.write("🎵 Step 3/4: Copyright-safe percussion shield synthesize ho raha hai...")
-            beat_path = generate_ambient_beat(duration=target_duration + 25)
+        status_box.write("🎵 Step 3/4: Copyright-safe percussion shield synthesize ho raha hai...")
+        beat_path = generate_ambient_beat(duration=target_duration + 25)
 
-            status_box.write("🎨 Step 4/4: Anti-Claim 9:16 layout, titles & descriptions render ho rahe hain...")
+        status_box.write("🎨 Step 4/4: Anti-Claim 9:16 layout, titles & descriptions render ho rahe hain...")
+        
+        created_shorts = []
+        progress_bar = st.progress(0)
+        
+        for idx, clip in enumerate(clips):
+            status_box.write(f"Rendering Short {idx+1}/{len(clips)}: {clip.get('title1')}...")
             
-            created_shorts = []
-            progress_bar = st.progress(0)
+            overlay_path = f"temp_overlays/overlay_{idx+1}.png"
+            create_overlay_png(clip, overlay_path, theme=theme)
             
-            for idx, clip in enumerate(clips):
-                status_box.write(f"Rendering Short {idx+1}/{len(clips)}: {clip.get('title1')}...")
-                
-                overlay_path = f"temp_overlays/overlay_{idx+1}.png"
-                create_overlay_png(clip, overlay_path, theme=theme)
-                
-                out_filename = f"Short_{idx+1}_{int(time.time())}.mp4"
-                out_path = os.path.join(output_folder, out_filename)
-                
-                render_short_video(
-                    input_video=video_path,
-                    start_sec=clip["start_sec"],
-                    duration_sec=clip["duration_sec"],
-                    output_file=out_path,
-                    overlay_file=overlay_path,
-                    beat_file=beat_path,
-                    mirror_flip=mirror_flip,
-                    zoom_crop=zoom_crop,
-                    speed_boost=speed_boost,
-                    audio_mode=audio_mode
-                )
-                
-                # Generate and save rich metadata
-                meta = generate_rich_clip_metadata(clip, info.get("title", ""), gemini_api_key=gemini_key)
-                meta_path = out_path.replace(".mp4", ".json")
-                with open(meta_path, "w") as mf:
-                    json.dump(meta, mf, indent=2)
-                
-                created_shorts.append({
-                    "path": out_path,
-                    "filename": out_filename,
-                    "clip": clip,
-                    "meta": meta
-                })
-                progress_bar.progress((idx + 1) / len(clips))
-                
-            status_box.update(label="🎉 Sabhi Shorts Successfully Taiyar Ho Gaye!", state="complete", expanded=False)
-            st.session_state["recent_shorts"] = created_shorts
-            st.balloons()
+            out_filename = f"Short_{idx+1}_{int(time.time())}.mp4"
+            out_path = os.path.join(output_folder, out_filename)
             
-        except Exception as e:
-            status_box.update(label="❌ Error aayi!", state="error")
-            st.error(f"Error: {str(e)}")
+            render_short_video(
+                input_video=video_path,
+                start_sec=clip["start_sec"],
+                duration_sec=clip["duration_sec"],
+                output_file=out_path,
+                overlay_file=overlay_path,
+                beat_file=beat_path,
+                mirror_flip=mirror_flip,
+                zoom_crop=zoom_crop,
+                speed_boost=speed_boost,
+                audio_mode=audio_mode
+            )
+            
+            # Generate and save rich metadata
+            meta = generate_rich_clip_metadata(clip, info.get("title", ""), gemini_api_key=gemini_key)
+            meta_path = out_path.replace(".mp4", ".json")
+            with open(meta_path, "w") as mf:
+                json.dump(meta, mf, indent=2)
+            
+            created_shorts.append({
+                "path": out_path,
+                "filename": out_filename,
+                "clip": clip,
+                "meta": meta
+            })
+            progress_bar.progress((idx + 1) / len(clips))
+            
+        status_box.update(label="🎉 Sabhi Shorts Successfully Taiyar Ho Gaye!", state="complete", expanded=False)
+        st.session_state["recent_shorts"] = created_shorts
+        st.balloons()
+        
+    except Exception as e:
+        status_box.update(label="❌ Error aayi!", state="error")
+        st.error(f"Error: {str(e)}")
 
 # Pro-Tips Upload Guide
 st.markdown("""
