@@ -4,8 +4,13 @@ import re
 import json
 import shutil
 import subprocess
-import numpy as np
 import wave
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from PIL import Image, ImageDraw, ImageFont
 
 FFMPEG_BIN = shutil.which("ffmpeg") or (
@@ -65,50 +70,105 @@ def generate_ambient_beat(duration=75, output_path="ambient_beat.wav", style="te
     """
     Synthesizes a copyright-free, rhythmic anti-claim backing beat.
     Features punchy kicks, crisp snares, 16th-note hi-hats, and atmospheric sub-chords.
-    The percussive transient spikes across 30Hz - 16kHz actively mask Content ID audio hashing.
+    Works seamlessly with NumPy or 100% Pure Python fallback.
     """
     sr = 44100
-    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
-    
-    bpm = 124.0
-    spb = 60.0 / bpm  # seconds per beat (~0.484s)
-    
-    # 1. Punchy Kick: on every beat
-    kick_t = t % spb
-    kick_env = np.exp(-kick_t * 16.0) * (kick_t < 0.28)
-    kick_f = 45.0 + 95.0 * np.exp(-kick_t * 28.0)
-    kick = np.sin(2 * np.pi * kick_f * kick_t) * kick_env * 0.65
-    
-    # 2. Snare / Clap: on beats 1 and 3 (0-indexed: 2nd and 4th beats)
-    snare_phase = (t + spb) % (2 * spb)
-    snare_env = np.exp(-snare_phase * 20.0) * (snare_phase < 0.22)
-    noise = np.random.uniform(-1, 1, len(t))
-    snare = (noise * 0.75 + np.sin(2 * np.pi * 190.0 * t) * 0.25) * snare_env * 0.40
-    
-    # 3. Crisp Hi-hats: 16th notes (spb / 4)
-    hat_phase = t % (spb / 4)
-    hat_env = np.exp(-hat_phase * 70.0) * (hat_phase < 0.08)
-    hat = noise * hat_env * 0.18
-    
-    # 4. Cinematic Bass & Lo-fi progression (D minor / F / C progression)
-    chord_time = (t % (spb * 16))
-    bass_freq = np.where(chord_time < spb * 4, 73.4,
-                np.where(chord_time < spb * 8, 65.4,
-                np.where(chord_time < spb * 12, 87.3, 58.27)))
-    drone = np.sin(2 * np.pi * bass_freq * t) * 0.15 + np.sin(2 * np.pi * (bass_freq * 1.5) * t) * 0.08
-    
-    mix = kick + snare + hat + drone
-    mix = mix / (np.max(np.abs(mix)) + 1e-6) * 0.65
-    
-    pcm = (mix * 32767).astype(np.int16)
-    stereo = np.column_stack([pcm, pcm]).flatten()
-    
-    with wave.open(output_path, "wb") as f:
-        f.setnchannels(2)
-        f.setsampwidth(2)
-        f.setframerate(sr)
-        f.writeframes(stereo.tobytes())
-    return output_path
+    if np is not None:
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        bpm = 124.0
+        spb = 60.0 / bpm
+        
+        # 1. Punchy Kick: on every beat
+        kick_t = t % spb
+        kick_env = np.exp(-kick_t * 16.0) * (kick_t < 0.28)
+        kick_f = 45.0 + 95.0 * np.exp(-kick_t * 28.0)
+        kick = np.sin(2 * np.pi * kick_f * kick_t) * kick_env * 0.65
+        
+        # 2. Snare / Clap: on beats 1 and 3
+        snare_phase = (t + spb) % (2 * spb)
+        snare_env = np.exp(-snare_phase * 20.0) * (snare_phase < 0.22)
+        noise = np.random.uniform(-1, 1, len(t))
+        snare = (noise * 0.75 + np.sin(2 * np.pi * 190.0 * t) * 0.25) * snare_env * 0.40
+        
+        # 3. Crisp Hi-hats: 16th notes
+        hat_phase = t % (spb / 4)
+        hat_env = np.exp(-hat_phase * 70.0) * (hat_phase < 0.08)
+        hat = noise * hat_env * 0.18
+        
+        # 4. Cinematic Bass & Lo-fi progression
+        chord_time = (t % (spb * 16))
+        bass_freq = np.where(chord_time < spb * 4, 73.4,
+                    np.where(chord_time < spb * 8, 65.4,
+                    np.where(chord_time < spb * 12, 87.3, 58.27)))
+        drone = np.sin(2 * np.pi * bass_freq * t) * 0.15 + np.sin(2 * np.pi * (bass_freq * 1.5) * t) * 0.08
+        
+        mix = kick + snare + hat + drone
+        mix = mix / (np.max(np.abs(mix)) + 1e-6) * 0.65
+        
+        pcm = (mix * 32767).astype(np.int16)
+        stereo = np.column_stack([pcm, pcm]).flatten()
+        
+        with wave.open(output_path, "wb") as f:
+            f.setnchannels(2)
+            f.setsampwidth(2)
+            f.setframerate(sr)
+            f.writeframes(stereo.tobytes())
+        return output_path
+    else:
+        # Zero-dependency Pure Python fallback
+        import math, random, struct
+        num_samples = int(sr * duration)
+        bpm = 124.0
+        spb = 60.0 / bpm
+        samples = []
+        for i in range(num_samples):
+            t = i / sr
+            kick_t = t % spb
+            if kick_t < 0.28:
+                kick_env = math.exp(-kick_t * 16.0)
+                kick_f = 45.0 + 95.0 * math.exp(-kick_t * 28.0)
+                kick = math.sin(2 * math.pi * kick_f * kick_t) * kick_env * 0.65
+            else:
+                kick = 0.0
+                
+            snare_phase = (t + spb) % (2 * spb)
+            if snare_phase < 0.22:
+                snare_env = math.exp(-snare_phase * 20.0)
+                noise = random.uniform(-1, 1)
+                snare = (noise * 0.75 + math.sin(2 * math.pi * 190.0 * t) * 0.25) * snare_env * 0.40
+            else:
+                snare = 0.0
+                
+            hat_phase = t % (spb / 4)
+            if hat_phase < 0.08:
+                hat_env = math.exp(-hat_phase * 70.0)
+                noise = random.uniform(-1, 1)
+                hat = noise * hat_env * 0.18
+            else:
+                hat = 0.0
+                
+            chord_time = t % (spb * 16)
+            if chord_time < spb * 4:
+                bass_freq = 73.4
+            elif chord_time < spb * 8:
+                bass_freq = 65.4
+            elif chord_time < spb * 12:
+                bass_freq = 87.3
+            else:
+                bass_freq = 58.27
+            drone = math.sin(2 * math.pi * bass_freq * t) * 0.15
+            
+            val = (kick + snare + hat + drone) * 0.6
+            val = max(-1.0, min(1.0, val))
+            ival = int(val * 32767)
+            samples.append(struct.pack('<hh', ival, ival))
+            
+        with wave.open(output_path, "wb") as f:
+            f.setnchannels(2)
+            f.setsampwidth(2)
+            f.setframerate(sr)
+            f.writeframes(b''.join(samples))
+        return output_path
 
 def parse_timestamps_from_text(text):
     """Finds timestamps like 01:30 or 12:45 in description."""
