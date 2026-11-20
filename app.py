@@ -203,7 +203,7 @@ def render_metadata_details(meta):
 st.markdown("""
 <div class="top-header">
     <div>
-        <p class="brand-title">⚡ AI SHORTS STUDIO PRO+</p>
+        <p class="brand-title">⚡ AI SHORTS STUDIO PRO1+</p>
         <span style="color: #8b949e; font-size: 0.82rem;">Smart YouTube to 9:16 Copyright-Safe Shorts</span>
     </div>
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
