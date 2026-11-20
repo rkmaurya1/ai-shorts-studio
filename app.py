@@ -4,28 +4,7 @@ import sys
 import time
 import glob
 import json
-
-# Ensure consistent working directory and imports regardless of where streamlit is invoked
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if APP_DIR not in sys.path:
-    sys.path.insert(0, APP_DIR)
-os.chdir(APP_DIR)
-
-from shorts_engine import (
-    download_youtube_video,
-    select_clip_moments,
-    generate_ambient_beat,
-    create_overlay_png,
-    render_short_video,
-    generate_rich_clip_metadata,
-    cleanup_old_files
-)
-
-# Auto-delete files older than 24 hours to keep storage free (₹0 bill forever)
-try:
-    cleanup_old_files(max_age_hours=24)
-except Exception:
-    pass
+import traceback
 
 st.set_page_config(
     page_title="AI Shorts Studio Pro",
@@ -33,6 +12,33 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# Ensure consistent working directory and imports regardless of where streamlit is invoked
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+os.chdir(APP_DIR)
+
+try:
+    from shorts_engine import (
+        download_youtube_video,
+        select_clip_moments,
+        generate_ambient_beat,
+        create_overlay_png,
+        render_short_video,
+        generate_rich_clip_metadata,
+        cleanup_old_files
+    )
+except Exception as e:
+    st.error(f"❌ Error loading shorts_engine: {type(e).__name__}: {str(e)}")
+    st.code(traceback.format_exc())
+    st.stop()
+
+# Auto-delete files older than 24 hours to keep storage free (₹0 bill forever)
+try:
+    cleanup_old_files(max_age_hours=24)
+except Exception:
+    pass
 
 # Responsive, Clean & Compact Video CSS
 st.markdown("""
