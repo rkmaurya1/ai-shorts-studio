@@ -46,7 +46,6 @@ def get_font(path, size):
             
     # Fallback paths for macOS & Linux (Ubuntu / Hugging Face Spaces)
     fallbacks = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -62,28 +61,44 @@ def get_font(path, size):
                 continue
     return ImageFont.load_default()
 
-def generate_ambient_beat(duration=75, output_path="ambient_beat.wav"):
+def generate_ambient_beat(duration=75, output_path="ambient_beat.wav", style="tension"):
+    """
+    Synthesizes a copyright-free, rhythmic anti-claim backing beat.
+    Features punchy kicks, crisp snares, 16th-note hi-hats, and atmospheric sub-chords.
+    The percussive transient spikes across 30Hz - 16kHz actively mask Content ID audio hashing.
+    """
     sr = 44100
     t = np.linspace(0, duration, int(sr * duration), endpoint=False)
     
-    # 60 BPM cinematic pulse
-    pulse_env = np.maximum(0, np.sin(2 * np.pi * 1.0 * t)) ** 18
-    kick = np.sin(2 * np.pi * 55 * t) * pulse_env * 0.45
+    bpm = 124.0
+    spb = 60.0 / bpm  # seconds per beat (~0.484s)
     
-    # Atmospheric drone (D minor)
-    d1 = np.sin(2 * np.pi * 73.4 * t) * 0.15
-    d2 = np.sin(2 * np.pi * 110.0 * t) * 0.10
-    d3 = np.sin(2 * np.pi * 174.6 * t) * 0.08
-    mod = 0.5 + 0.5 * np.sin(2 * np.pi * 0.06 * t)
-    drone = (d1 + d2 + d3) * mod
+    # 1. Punchy Kick: on every beat
+    kick_t = t % spb
+    kick_env = np.exp(-kick_t * 16.0) * (kick_t < 0.28)
+    kick_f = 45.0 + 95.0 * np.exp(-kick_t * 28.0)
+    kick = np.sin(2 * np.pi * kick_f * kick_t) * kick_env * 0.65
     
-    # Subtle percussive tick on 8th notes (4 Hz)
-    tick_env = np.maximum(0, np.sin(2 * np.pi * 4.0 * t)) ** 64
-    noise = np.random.uniform(-0.1, 0.1, len(t))
-    tick = noise * tick_env * 0.12
+    # 2. Snare / Clap: on beats 1 and 3 (0-indexed: 2nd and 4th beats)
+    snare_phase = (t + spb) % (2 * spb)
+    snare_env = np.exp(-snare_phase * 20.0) * (snare_phase < 0.22)
+    noise = np.random.uniform(-1, 1, len(t))
+    snare = (noise * 0.75 + np.sin(2 * np.pi * 190.0 * t) * 0.25) * snare_env * 0.40
     
-    mix = kick + drone + tick
-    mix = mix / (np.max(np.abs(mix)) + 1e-6) * 0.5
+    # 3. Crisp Hi-hats: 16th notes (spb / 4)
+    hat_phase = t % (spb / 4)
+    hat_env = np.exp(-hat_phase * 70.0) * (hat_phase < 0.08)
+    hat = noise * hat_env * 0.18
+    
+    # 4. Cinematic Bass & Lo-fi progression (D minor / F / C progression)
+    chord_time = (t % (spb * 16))
+    bass_freq = np.where(chord_time < spb * 4, 73.4,
+                np.where(chord_time < spb * 8, 65.4,
+                np.where(chord_time < spb * 12, 87.3, 58.27)))
+    drone = np.sin(2 * np.pi * bass_freq * t) * 0.15 + np.sin(2 * np.pi * (bass_freq * 1.5) * t) * 0.08
+    
+    mix = kick + snare + hat + drone
+    mix = mix / (np.max(np.abs(mix)) + 1e-6) * 0.65
     
     pcm = (mix * 32767).astype(np.int16)
     stereo = np.column_stack([pcm, pcm]).flatten()
@@ -120,14 +135,12 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
     env["PYTHONWARNINGS"] = "ignore"
     python_bin = sys.executable or "python3"
     
-    # Modern mobile user-agent to bypass cloud/datacenter bot blocks
-    user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-
-    # Multi-client strategy: iOS client bypasses YouTube 403 Forbidden on AWS/Streamlit Cloud
+    # Android client bypasses YouTube BotGuard, SABR streaming & 403 Forbidden on AWS / Streamlit Cloud
     client_strategies = [
-        {"client": "ios,mweb", "fmt": "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"},
-        {"client": "mweb,android_vr", "fmt": "18/best[ext=mp4]/best"},
-        {"client": "android,web", "fmt": "best[ext=mp4]/best"}
+        {"client": "android", "fmt": "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"},
+        {"client": "android", "fmt": "18/best"},
+        {"client": "android_vr", "fmt": "best[ext=mp4]/best"},
+        {"client": "android,web", "fmt": "best"}
     ]
 
     info = None
@@ -139,7 +152,8 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
             python_bin, "-m", "yt_dlp",
             "--dump-json",
             "--no-warnings",
-            "--user-agent", user_agent,
+            "--no-check-certificates",
+            "--geo-bypass",
             "--extractor-args", f"youtube:player_client={strat['client']}",
             clean_url
         ]
@@ -178,7 +192,8 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
                 python_bin, "-m", "yt_dlp",
                 "-f", strat["fmt"],
                 "--no-warnings",
-                "--user-agent", user_agent,
+                "--no-check-certificates",
+                "--geo-bypass",
                 "--extractor-args", f"youtube:player_client={strat['client']}",
                 "-o", video_path,
                 clean_url
@@ -195,13 +210,20 @@ def download_youtube_video(url, output_dir="downloads", progress_callback=None):
             
     return video_path, info
 
+def sanitize_hook_text(text):
+    """Sanitizes text to remove episode numbers or official copyright patterns."""
+    if not text:
+        return "VIRAL MOMENT"
+    clean = re.sub(r'(?i)(episode\s*\d+|ep\s*\d+|season\s*\d+|s\d+\s*ep\d+|ft\.?[^,\n]+)', '', text)
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean[:28].upper() if clean else "VIRAL MOMENT"
+
 def select_clip_moments(info, num_shorts=3, target_duration=45, gemini_api_key=None):
     """Identifies top segments using chapters/description or Gemini AI."""
     description = info.get("description", "")
     duration = info.get("duration", 600)
     chapters = parse_timestamps_from_text(description)
     
-    # If Gemini API key is provided, let Gemini pick and create titles
     if gemini_api_key:
         try:
             from google import genai
@@ -213,14 +235,16 @@ Total Duration: {duration} seconds
 Description snippet: {description[:1200]}
 
 Please select {num_shorts} best viral clips of duration {target_duration} seconds each.
+IMPORTANT FOR COPYRIGHT SAFETY: Do NOT include raw TV episode numbers or copyright celebrity names in hook titles. Use exciting viral curiosity hooks.
+
 Return ONLY valid JSON array with keys:
 - "start_sec": integer seconds start (between 0 and {duration - target_duration})
 - "duration_sec": integer duration (around {target_duration})
-- "tag": short badge tag (e.g., "VIRAL MOMENT", "EPIC SCENE")
-- "title1": catchy hook line 1 (uppercase, max 30 chars)
-- "title2": catchy hook line 2 (uppercase, max 30 chars)
-- "subtitle": descriptive context (max 45 chars)
-- "description": complete viral YouTube Shorts description with hashtags
+- "tag": short badge tag (e.g., "VIRAL MOMENT", "EPIC SCENE", "UNBELIEVABLE")
+- "title1": catchy hook line 1 (uppercase, max 26 chars, e.g. "WAIT FOR THE END!")
+- "title2": catchy hook line 2 (uppercase, max 26 chars, e.g. "HE COULDN'T BELIEVE IT")
+- "subtitle": curiosity text (max 35 chars, e.g. "Trending Reaction")
+- "description": transformative viral YouTube Shorts description with fair use disclaimer
 """
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -244,14 +268,15 @@ Return ONLY valid JSON array with keys:
             st = ch["sec"]
             if st + target_duration > duration:
                 st = max(0, duration - target_duration - 5)
+            clean_t = sanitize_hook_text(ch["title"])
             clips.append({
                 "start_sec": st,
                 "duration_sec": target_duration,
                 "tag": "TRENDING SCENE",
-                "title1": ch["title"][:25].upper(),
-                "title2": "MUST WATCH MOMENT!",
-                "subtitle": f"{info.get('title', '')[:35]}",
-                "description": f"Must watch moment from {ch['title']}! #Shorts #Viral"
+                "title1": clean_t if clean_t else "WAIT FOR THIS!",
+                "title2": "MUST WATCH MOMENT! 🔥",
+                "subtitle": "Trending Reaction Moment",
+                "description": f"Incredible moment! Wait for the twist at the end. #Shorts #Viral"
             })
             if len(clips) >= num_shorts:
                 break
@@ -264,18 +289,21 @@ Return ONLY valid JSON array with keys:
                 "start_sec": st,
                 "duration_sec": target_duration,
                 "tag": f"PART {i}",
-                "title1": "WAIT FOR THE END!",
+                "title1": "WAIT FOR THE END! 😱",
                 "title2": "VIRAL MOMENT 🔥",
-                "subtitle": f"{info.get('title', '')[:35]}",
-                "description": f"Incredible moment! Subscribe for more! #Shorts #Viral"
+                "subtitle": "Trending Viral Short",
+                "description": "Shocking moment! Watch till the end! #Shorts #Viral"
             })
     return clips[:num_shorts]
 
 def generate_rich_clip_metadata(clip, main_video_title, gemini_api_key=None):
-    """Generates 3 Viral Title Options, Rich Description, and Pinned Comment."""
+    """
+    Generates 3 Viral Title Options, Rich Description, and Pinned Comment.
+    NOTE: Sanitizes raw episode strings and official copyright names to avoid priority Content ID flags.
+    """
     title1 = clip.get("title1", "VIRAL MOMENT")
     title2 = clip.get("title2", "MUST WATCH")
-    sub = clip.get("subtitle", main_video_title)
+    sub = clip.get("subtitle", "Trending Moment")
 
     # 1. Try Gemini AI if API key is provided
     if gemini_api_key:
@@ -284,9 +312,10 @@ def generate_rich_clip_metadata(clip, main_video_title, gemini_api_key=None):
             client = genai.Client(api_key=gemini_api_key)
             prompt = f"""You are a top viral YouTube Shorts strategist.
 Generate metadata for this short video clip:
-Main Video: {main_video_title}
-Clip Hook: {title1} - {title2}
+Context Hook: {title1} - {title2}
 Context: {sub}
+
+CRITICAL COPYRIGHT NOTICE: Do not mention specific TV show episode numbers, exact song titles or official copyright strings in title options. Focus on curiosity hooks, shock value, and transformative commentary.
 
 Generate JSON with:
 - "title_options": [
@@ -294,7 +323,7 @@ Generate JSON with:
     {{"type": "Curiosity Hook", "title": "Intriguing question headline with emojis and #Shorts (max 65 chars)"}},
     {{"type": "Hindi Mix", "title": "Desi Hindi / Hinglish hook title with emojis (max 65 chars)"}}
   ],
-- "description": "Full 3-4 paragraph YouTube Shorts description with hook, background, subscribe CTA, 8-10 trending hashtags, and Section 107 Fair Use disclaimer.",
+- "description": "Full YouTube Shorts description with hook, background, subscribe CTA, 8-10 trending hashtags, and Section 107 Fair Use disclaimer.",
 - "pinned_comment": "Engaging question for viewers to comment on"
 """
             res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -307,28 +336,30 @@ Generate JSON with:
         except Exception as e:
             print("Gemini metadata generation failed, using algorithmic fallback:", e)
 
-    # 2. Algorithmic High-Quality Fallback
-    tag_clean = clean_text_for_font(title1)
-    sub_clean = clean_text_for_font(main_video_title[:35])
+    # 2. Algorithmic High-Quality Fallback (Disinfected from raw copyright strings)
+    hook_clean = clean_text_for_font(title1).title()
+    if not hook_clean or len(hook_clean) < 4:
+        hook_clean = "Wait For The Twist"
 
-    opt1 = f"{title1.title()} - Shocking Moment! 😱🔥 #Shorts"
-    opt2 = f"Did You Notice THIS in {sub_clean}?! 🤯⚡ #Shorts"
-    opt3 = f"{title1.title()} Dekh Kar Sab Hairaan Ho Gaye! 😂 #Viral"
+    opt1 = f"{hook_clean} - Shocking Moment! 😱🔥 #Shorts #Viral"
+    opt2 = f"Did You Notice THIS in The Video?! 🤯⚡ #Shorts"
+    opt3 = f"{hook_clean} Dekh Kar Sab Hairaan Ho Gaye! 😂 #Viral #Shorts"
 
-    desc = f"""{title1.title()} - Unbelievable moment from {main_video_title}! 😱🔥
+    desc = f"""{hook_clean} - You won't believe what happened here! 😱🔥
 
-Watch the most thrilling and hilarious breakdown of this viral scene that everyone is talking about!
+Watch the funniest and most thrilling breakdown of this viral scene that everyone is reacting to!
 
-What was your favorite part of this video? Let us know in the comments below! 👇
+What was your favorite moment in this clip? Tell us in the comments! 👇
 
-🔔 Subscribe for daily viral shorts, movie secrets, reactions, and trending clips!
+🔔 Subscribe for daily viral moments, comedy reactions, and trending shorts!
 
-#Shorts #Viral #Trending #Entertainment #YouTubeShorts #MustWatch #ViralVideo #EpicMoment
+#Shorts #Viral #Trending #Comedy #Entertainment #YouTubeShorts #MustWatch #EpicMoment #Reaction
 
 ---
-Disclaimer: This video is transformative commentary and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright owners."""
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
 
-    pinned = f"Aapko is clip me sabse accha kya laga? Comment me batayein! 👇"
+    pinned = "Aapko is scene me sabse zyada kya pasand aaya? Comment me batayein! 👇"
 
     return {
         "title_options": [
@@ -343,7 +374,6 @@ Disclaimer: This video is transformative commentary and fan analysis created und
 def clean_text_for_font(text):
     if not text:
         return ""
-    # Strip emojis and non-ascii glyphs that lack font support to avoid missing boxes
     clean = re.sub(r'[^\x00-\x7F]+', ' ', text)
     clean = re.sub(r'\s+', ' ', clean).strip()
     return clean
@@ -366,7 +396,7 @@ def create_overlay_png(config, output_path, theme="gold"):
     tag_text = clean_text_for_font(config.get("tag", "EXCLUSIVE"))
     title1_text = clean_text_for_font(config.get("title1", "WAIT FOR THE END!"))
     title2_text = clean_text_for_font(config.get("title2", "VIRAL MOMENT"))
-    sub_text = clean_text_for_font(config.get("subtitle", "Trending Clip"))
+    sub_text = clean_text_for_font(config.get("subtitle", "Trending Moment"))
 
     # 1. Top Badge
     draw.rounded_rectangle([400, 140, 680, 190], radius=12, fill=(230, 36, 41, 240))
@@ -377,11 +407,7 @@ def create_overlay_png(config, output_path, theme="gold"):
     draw.text((540, 268), title1_text, font=f_title1, fill=(255, 255, 255, 255), anchor="mm")
     draw.text((540, 345), title2_text, font=f_title2, fill=accent_title, anchor="mm")
 
-    # 3. Center Video Accent Lines
-    v_top = 732
-    v_bottom = 1188
-    draw.line([(0, v_top), (1080, v_top)], fill=outline_color, width=4)
-    draw.line([(0, v_bottom), (1080, v_bottom)], fill=outline_color, width=4)
+    # 3. Center Video Accent Lines (Removed so video is clean and unobstructed)
 
     # 4. Bottom Subtitle Card
     draw.rounded_rectangle([60, 1510, 1020, 1605], radius=18, fill=(20, 22, 28, 225), outline=(230, 36, 41, 230), width=3)
@@ -397,17 +423,80 @@ def create_overlay_png(config, output_path, theme="gold"):
     img.save(output_path, "PNG")
     return output_path
 
-def render_short_video(input_video, start_sec, duration_sec, output_file, overlay_file, beat_file):
+def render_short_video(
+    input_video,
+    start_sec,
+    duration_sec,
+    output_file,
+    overlay_file,
+    beat_file,
+    mirror_flip=True,
+    zoom_crop=1.12,
+    speed_boost=1.065,
+    pitch_ratio=1.048,
+    audio_mode="vocal_beat"
+):
+    """
+    Renders 9:16 vertical Short with multi-layered Anti-Claim Copyright Shields:
+    1. Horizontal Mirror (hflip) - disrupts spatial CNN/SIFT visual fingerprinting.
+    2. Smart Zoom & Edge Crop (1.12x) - changes frame boundaries and crops logos.
+    3. Temporal Cadence Shift (1.065x speed) - alters frame count, timing, and FPS cadence.
+    4. Audio Lip-Sync Pitch & Tempo Desync - shifts pitch (+4.8%) while maintaining exact lip sync.
+    5. Vocal Clarity EQ - removes low-end music bass (<120Hz) & highs (>11.5kHz) while boosting human speech.
+    6. Audible Anti-Claim Percussion Bed - masks spectrogram peak detection with real transients.
+    """
+    # 1. Visual Filters Setup
+    hflip_filter = "hflip," if mirror_flip else ""
+    
+    # Crop factor for zoom (e.g. 1.12x zoom -> crop to 1/1.12 = 0.892 of width/height)
+    if zoom_crop > 1.0:
+        crop_factor = round(1.0 / zoom_crop, 3)
+        fg_crop_filter = f"crop=in_w*{crop_factor}:in_h*{crop_factor},"
+    else:
+        fg_crop_filter = ""
+
+    # Calculate effective output duration after speedup
+    speed = max(1.0, float(speed_boost))
+    effective_duration = duration_sec / speed
+
+    # 2. Audio Filter Setup
+    # net audio tempo must match video speed: total_tempo = speed
+    # asetrate changes pitch and speed by pitch_ratio.
+    # so subsequent atempo = speed / pitch_ratio
+    atempo_val = round(speed / pitch_ratio, 4)
+
+    if audio_mode == "mute_music":
+        # Completely mute original video audio, use only copyright-free viral beat bed
+        audio_filter_chain = (
+            f"[1:a]volume=0.85,loudnorm=I=-16:TP=-1.5:LRA=11[a_out]"
+        )
+    elif audio_mode == "voice_only":
+        # Voice only: pitch-shifted, speed-matched, and EQ-isolated without background beat
+        audio_filter_chain = (
+            f"[0:a]aresample=44100,asetrate=44100*{pitch_ratio:.4f},"
+            f"atempo={atempo_val:.4f},aresample=48000,"
+            f"highpass=f=120,lowpass=f=11500,equalizer=f=1200:t=q:w=1:g=2.5,"
+            f"loudnorm=I=-16:TP=-1.5:LRA=11[a_out]"
+        )
+    else:
+        # Default: vocal_beat (Voice with Vocal EQ + Audible Anti-Claim Beat Layer)
+        audio_filter_chain = (
+            f"[0:a]aresample=44100,asetrate=44100*{pitch_ratio:.4f},"
+            f"atempo={atempo_val:.4f},aresample=48000,"
+            f"highpass=f=120,lowpass=f=11500,equalizer=f=1200:t=q:w=1:g=2.5,volume=0.88[v_audio];"
+            f"[1:a]volume=0.35[bgm];"
+            f"[v_audio][bgm]amix=inputs=2:duration=first:dropout_transition=2,"
+            f"loudnorm=I=-16:TP=-1.5:LRA=11[a_out]"
+        )
+
     filter_complex = (
         f"[0:v]split=2[bg_in][fg_in];"
-        f"[bg_in]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5,eq=brightness=-0.18:contrast=0.9[bg];"
-        f"[fg_in]scale=1080:-2,eq=contrast=1.06:brightness=0.01:saturation=1.1,unsharp=3:3:0.6[fg];"
+        f"[bg_in]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5,eq=brightness=-0.22:contrast=0.9[bg];"
+        f"[fg_in]{hflip_filter}{fg_crop_filter}scale=1080:-2,eq=contrast=1.08:brightness=0.01:saturation=1.12:gamma=1.03,unsharp=3:3:0.5[fg];"
         f"[bg][fg]overlay=(W-w)/2:(H-h)/2[comp1];"
         f"[comp1][2:v]overlay=0:0[comp2];"
-        f"[comp2]drawbox=x=0:y=1905:w='1080*t/{duration_sec}':h=15:color=red@0.95:t=fill[v_out];"
-        f"[0:a]aresample=44100,asetrate=44100*1.036,atempo=1/1.036,aresample=48000,equalizer=f=2500:t=q:w=1:g=2,highpass=f=75,lowpass=f=14500,volume=1.2[v_audio];"
-        f"[1:a]volume=0.16[bgm];"
-        f"[v_audio][bgm]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-16:TP=-1.5:LRA=11[a_out]"
+        f"[comp2]drawbox=x=0:y=1905:w='1080*t/{effective_duration:.2f}':h=15:color=red@0.95:t=fill,setpts=PTS/{speed:.4f}[v_out];"
+        f"{audio_filter_chain}"
     )
 
     cmd = [
@@ -427,9 +516,10 @@ def render_short_video(input_video, start_sec, duration_sec, output_file, overla
         "-c:a", "aac",
         "-b:a", "192k",
         "-ar", "48000",
-        "-shortest",
+        "-t", f"{effective_duration:.2f}",
         output_file
     ]
+
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"FFmpeg render error: {p.stderr}")

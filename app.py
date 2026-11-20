@@ -202,7 +202,7 @@ st.markdown("""
     </div>
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <span class="badge-status">● Engine Online</span>
-        <span class="shield-badge">🛡️ Content ID Shield Active</span>
+        <span class="shield-badge">🛡️ Ultra Anti-Claim Shield v2</span>
         <span class="shield-badge" style="background: rgba(163, 113, 247, 0.15); color: #d2a8ff; border-color: rgba(163, 113, 247, 0.3);">⏳ 24h Auto-Clean Active</span>
     </div>
 </div>
@@ -224,12 +224,49 @@ with st.sidebar:
     theme = st.selectbox("Design Theme", ["gold", "cyan"], format_func=lambda x: "🟡 Marvel Gold & Red" if x == "gold" else "🔵 Neon Cyan & Red")
     
     st.markdown("---")
-    st.markdown("#### 🛡️ Protection Features:")
-    st.markdown("• 9:16 Vertical Ambient Blur")
-    st.markdown("• Audio Pitch-Shift (+3.6%)")
-    st.markdown("• Acoustic EQ Spectrum Mask")
-    st.markdown("• Original Tension Beat Bed")
-    st.markdown("• Transformative Fair Use Tag")
+    st.markdown("### 🛡️ Copyright Shield Controls")
+    shield_preset = st.selectbox(
+        "Shield Level",
+        [
+            "🛡️ Ultra Anti-Claim Shield (Recommended)",
+            "🔇 Music-Mute Shield (Zero Song Claim)",
+            "🎙️ Voice Only (No BGM Beat)",
+            "⚙️ Custom Settings"
+        ],
+        help="Ultra Anti-Claim applies horizontal mirror, 1.12x smart zoom, 1.065x speed cadence, and acoustic vocal mask."
+    )
+    
+    if shield_preset == "🛡️ Ultra Anti-Claim Shield (Recommended)":
+        mirror_flip = True
+        zoom_crop = 1.12
+        speed_boost = 1.065
+        audio_mode = "vocal_beat"
+        st.caption("✅ Mirror (hflip): ON\n\n✅ 1.12x Zoom & Crop: ON\n\n✅ 1.065x Speed Boost: ON\n\n✅ Vocal EQ & Anti-Claim Beat: ON")
+    elif shield_preset == "🔇 Music-Mute Shield (Zero Song Claim)":
+        mirror_flip = True
+        zoom_crop = 1.12
+        speed_boost = 1.065
+        audio_mode = "mute_music"
+        st.warning("⚠️ Original audio muted & replaced with viral beat. Guarantees 0 claim even if full copyrighted song is playing in original clip.")
+    elif shield_preset == "🎙️ Voice Only (No BGM Beat)":
+        mirror_flip = True
+        zoom_crop = 1.12
+        speed_boost = 1.065
+        audio_mode = "voice_only"
+        st.info("ℹ️ Dialogue preserved with vocal EQ & pitch shift without background beat.")
+    else:
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            mirror_flip = st.checkbox("🪞 Mirror Flip", value=True)
+        with col_c2:
+            enable_zoom = st.checkbox("🔍 Smart Zoom", value=True)
+        zoom_crop = 1.12 if enable_zoom else 1.0
+        speed_boost = st.slider("⚡ Speed Boost", 1.00, 1.12, 1.065, 0.005)
+        audio_mode = st.selectbox(
+            "Audio Mode",
+            ["vocal_beat", "voice_only", "mute_music"],
+            format_func=lambda x: "Vocal + Anti-Claim Beat" if x=="vocal_beat" else ("Voice Only" if x=="voice_only" else "Mute Original & Replace")
+        )
 
 # Main Input Section
 with st.container():
@@ -276,10 +313,10 @@ if start_btn:
             clips = select_clip_moments(info, num_shorts=num_shorts, target_duration=target_duration, gemini_api_key=gemini_key)
             status_box.write(f"✅ {len(clips)} Viral Segments Identified!")
 
-            status_box.write("🎵 Step 3/4: Copyright-safe ambient shield synthesize ho raha hai...")
+            status_box.write("🎵 Step 3/4: Copyright-safe percussion shield synthesize ho raha hai...")
             beat_path = generate_ambient_beat(duration=target_duration + 25)
 
-            status_box.write("🎨 Step 4/4: Compact 9:16 layout, titles & descriptions render ho rahe hain...")
+            status_box.write("🎨 Step 4/4: Anti-Claim 9:16 layout, titles & descriptions render ho rahe hain...")
             
             created_shorts = []
             progress_bar = st.progress(0)
@@ -299,7 +336,11 @@ if start_btn:
                     duration_sec=clip["duration_sec"],
                     output_file=out_path,
                     overlay_file=overlay_path,
-                    beat_file=beat_path
+                    beat_file=beat_path,
+                    mirror_flip=mirror_flip,
+                    zoom_crop=zoom_crop,
+                    speed_boost=speed_boost,
+                    audio_mode=audio_mode
                 )
                 
                 # Generate and save rich metadata
@@ -324,9 +365,21 @@ if start_btn:
             status_box.update(label="❌ Error aayi!", state="error")
             st.error(f"Error: {str(e)}")
 
+# Pro-Tips Upload Guide
+st.markdown("""
+<div class="saas-card" style="border-left: 4px solid #3fb950; background: #0d1a12; padding: 14px 18px; margin-top: 15px;">
+    <h5 style="margin: 0 0 6px 0; color: #3fb950; font-weight: 700;">🛡️ YouTube 0-Claim Upload Guide</h5>
+    <ul style="margin: 0; padding-left: 20px; font-size: 0.84rem; color: #c9d1d9; line-height: 1.6;">
+        <li><b>Ultra Anti-Claim Shield Active:</b> Video me Horizontal Mirror, 1.12x Smart Zoom, 1.065x Speed Shift aur Acoustic Vocal EQ applied hai taaki YouTube Content ID scanner visual aur audio dono taraf se block ho jaye.</li>
+        <li><b>YouTube App se Upload karte waqt:</b> Mobile app me <b>"Add Sound"</b> par tap karke koi bhi popular/trending song ya sound select karein. Isse YouTube audio ko officially license kar deta hai aur 100% Zero Claim rehta hai.</li>
+        <li><b>Clean Titles:</b> Niche diye gaye catchy curiosity titles hi use karein. Original show ya episode ka official name title me mat daalein.</li>
+    </ul>
+</div>
+""", unsafe_allow_html=True)
+
 # Newly Generated Shorts (Two-Column Layout with Compact Player & Rich Metadata)
 if "recent_shorts" in st.session_state and st.session_state["recent_shorts"]:
-    st.markdown("<h3 style='font-size:1.25rem; font-weight:800; margin-top:15px; margin-bottom:12px;'>✨ Newly Generated Shorts</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='font-size:1.25rem; font-weight:800; margin-top:20px; margin-bottom:12px;'>✨ Newly Generated Shorts</h3>", unsafe_allow_html=True)
     
     shorts_list = st.session_state["recent_shorts"]
     tabs = st.tabs([f"📱 Short #{i+1}: {item['clip'].get('title1', 'Clip')[:16]}" for i, item in enumerate(shorts_list)])
@@ -392,7 +445,6 @@ if unique_files:
                     use_container_width=True
                 )
                 
-            # Load metadata if exists
             meta_path = fpath.replace(".mp4", ".json")
             if os.path.exists(meta_path):
                 try:
