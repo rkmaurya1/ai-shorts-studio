@@ -226,7 +226,7 @@ with st.sidebar:
         help="Free key from aistudio.google.com. Khali chhodne par auto-scene detection use hoga."
     )
     
-    num_shorts = st.slider("Kitne Shorts Banane Hain?", min_value=1, max_value=5, value=3)
+    num_shorts = st.slider("Kitne Shorts Banane Hain?", min_value=1, max_value=10, value=8, help="By default 8 viral shorts generate honge.")
     target_duration = st.slider("Short Duration (Seconds)", min_value=30, max_value=55, value=45)
     theme = st.selectbox("Design Theme", ["gold", "cyan"], format_func=lambda x: "🟡 Marvel Gold & Red" if x == "gold" else "🔵 Neon Cyan & Red")
     
@@ -387,7 +387,7 @@ if trigger_pipeline:
             )
             
             # Generate and save rich metadata
-            meta = generate_rich_clip_metadata(clip, info.get("title", ""), gemini_api_key=gemini_key)
+            meta = generate_rich_clip_metadata(clip, info.get("title", ""), info=info, gemini_api_key=gemini_key)
             meta_path = out_path.replace(".mp4", ".json")
             with open(meta_path, "w") as mf:
                 json.dump(meta, mf, indent=2)

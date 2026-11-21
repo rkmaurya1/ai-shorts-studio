@@ -329,33 +329,103 @@ def sanitize_hook_text(text):
     clean = re.sub(r'\s+', ' ', clean).strip()
     return clean[:28].upper() if clean else "VIRAL MOMENT"
 
-def select_clip_moments(info, num_shorts=3, target_duration=45, gemini_api_key=None):
-    """Identifies top segments using chapters/description or Gemini AI."""
+def detect_video_genre_and_context(info):
+    """
+    Detects creator, genre, mood, and relevant keywords from video metadata.
+    Supported genres:
+    - funny_roast: CarryMinati, comedy, roast, gaming rage, meme, standup
+    - motivational_emotional: life lesson, emotional, inspirational, struggle, wisdom
+    - gaming: gameplay, clutch, pro player, gta, pubg, bgmi, free fire
+    - podcast_interview: raw conversation, truth reveal, exposed, dark reality
+    - horror_mystery: spooky, scary, 3am, paranormal, mystery
+    - tech_review: gadgets, smartphone, ai, unboxing, tricks
+    - devotional_spiritual: bhajan, katha, krishna, shiva, ram, temple, aarti
+    - general_trending: tailored to main subject
+    """
+    if not isinstance(info, dict):
+        info = {"title": str(info)}
+    title = str(info.get("title", "")).strip()
+    channel = str(info.get("channel", info.get("uploader", ""))).strip()
+    desc = str(info.get("description", ""))[:1500].lower()
+    combined_text = f"{title} {channel} {desc}".lower()
+
+    # Identify primary creator / subject name if prominent
+    creator_name = ""
+    for c in ["carryminati", "carryislive", "carry", "samay raina", "bhuvan bam", "bb ki vines", 
+              "ashish chanchlani", "round2hell", "r2h", "triggered insaan", "fukra insaan",
+              "sandeep maheshwari", "khan sir", "ojha sir", "vikas divyakirti", "sonu sharma",
+              "dhruv rathee", "beerbiceps", "ranveer allahbadia", "tanmay bhat", "mortal", "scout",
+              "total gaming", "techno gamerz", "mythpat"]:
+        if c in combined_text:
+            creator_name = c.title()
+            break
+
+    # Genre determination
+    if any(k in combined_text for k in ["carryminati", "carryislive", "roast", "funny", "comedy", "meme", "hasna", "lmao", "lol", "standup", "bassi", "samay raina", "chutkula", "prank", "triggered insaan", "fukra insaan"]):
+        genre = "funny_roast"
+    elif any(k in combined_text for k in ["motivat", "inspira", "emotion", "sad", "tears", "cry", "life lesson", "truth", "reality", "struggle", "success", "upsc", "ias", "sandeep maheshwari", "khan sir", "ojha sir", "divyakirti", "mindset", "seekh"]):
+        genre = "motivational_emotional"
+    elif any(k in combined_text for k in ["gameplay", "gta", "bgmi", "pubg", "free fire", "minecraft", "clutch", "headshot", "esports", "total gaming", "techno gamerz", "gaming"]):
+        genre = "gaming"
+    elif any(k in combined_text for k in ["podcast", "interview", "beerbiceps", "ranveer", "unfiltered", "secrets", "untold", "exposed", "scam", "case study", "dark reality", "conversation"]):
+        genre = "podcast_interview"
+    elif any(k in combined_text for k in ["horror", "scary", "ghost", "bhoot", "chudail", "paranormal", "haunted", "creepy", "mystery", "3 am", "darr"]):
+        genre = "horror_mystery"
+    elif any(k in combined_text for k in ["iphone", "smartphone", "unboxing", "review", "gadget", "laptop", "android", "tech", "ai tool"]):
+        genre = "tech_review"
+    elif any(k in combined_text for k in ["bhajan", "katha", "ram", "krishna", "shiva", "hanuman", "aarti", "mandir", "temple", "spiritual"]):
+        genre = "devotional_spiritual"
+    else:
+        genre = "general_trending"
+
+    # Extract clean subject from title
+    clean_title = re.sub(r'\[.*?\]|\(.*?\)|(?i)(official video|full video|4k|hd|trailer|teaser|full episode|first time)', '', title).strip()
+    clean_title = re.sub(r'\s+', ' ', clean_title)
+    
+    return {
+        "genre": genre,
+        "creator": creator_name or channel,
+        "clean_title": clean_title,
+        "raw_title": title,
+        "channel": channel
+    }
+
+def select_clip_moments(info, num_shorts=8, target_duration=45, gemini_api_key=None):
+    """Identifies top segments using chapters/description, Gemini AI, or Context-Aware intervals."""
     description = info.get("description", "")
     duration = info.get("duration", 600)
     chapters = parse_timestamps_from_text(description)
-    
+    ctx = detect_video_genre_and_context(info)
+    genre = ctx["genre"]
+    creator = ctx["creator"]
+    clean_title = ctx["clean_title"]
+
     if gemini_api_key:
         try:
             from google import genai
             client = genai.Client(api_key=gemini_api_key)
-            prompt = f"""You are a viral YouTube Shorts editor.
-Analyze this YouTube video metadata:
+            prompt = f"""You are a top viral YouTube Shorts strategist and video editor.
+Analyze this video metadata:
 Title: {info.get('title')}
+Creator/Channel: {ctx['creator']}
+Detected Genre/Style: {genre}
 Total Duration: {duration} seconds
 Description snippet: {description[:1200]}
 
-Please select {num_shorts} best viral clips of duration {target_duration} seconds each.
-IMPORTANT FOR COPYRIGHT SAFETY: Do NOT include raw TV episode numbers or copyright celebrity names in hook titles. Use exciting viral curiosity hooks.
+Select {num_shorts} best viral clips of duration {target_duration} seconds each.
+CRITICAL INSTRUCTIONS:
+1. The hooks, titles and descriptions MUST specifically match the video theme (e.g. if CarryMinati / Funny -> high-energy comedy, savage roasts, funny punchlines; if Motivational/Emotional -> deep, inspiring, heart-touching hooks; if Gaming -> insane clutch/rage moments).
+2. DO NOT use generic placeholder text. Reflect the actual video subject!
+3. For copyright safety, do not put raw TV episode numbers in overlay titles.
 
-Return ONLY valid JSON array with keys:
-- "start_sec": integer seconds start (between 0 and {duration - target_duration})
+Return ONLY valid JSON array of {num_shorts} objects with keys:
+- "start_sec": integer seconds start (between 0 and {max(0, int(duration - target_duration))})
 - "duration_sec": integer duration (around {target_duration})
-- "tag": short badge tag (e.g., "VIRAL MOMENT", "EPIC SCENE", "UNBELIEVABLE")
-- "title1": catchy hook line 1 (uppercase, max 26 chars, e.g. "WAIT FOR THE END!")
-- "title2": catchy hook line 2 (uppercase, max 26 chars, e.g. "HE COULDN'T BELIEVE IT")
-- "subtitle": curiosity text (max 35 chars, e.g. "Trending Reaction")
-- "description": transformative viral YouTube Shorts description with fair use disclaimer
+- "tag": short badge tag (e.g. "SAVAGE ROAST", "EPIC MOMENT", "GOLDEN WORDS", "UNREAL SCENE")
+- "title1": catchy top hook line (uppercase, max 26 chars)
+- "title2": catchy bottom hook line (uppercase, max 26 chars)
+- "subtitle": curiosity text (max 35 chars)
+- "description": transformative viral YouTube Shorts description
 """
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -368,65 +438,162 @@ Return ONLY valid JSON array with keys:
             if isinstance(clips, list) and len(clips) > 0:
                 return clips[:num_shorts]
         except Exception as e:
-            print("Gemini API call failed, falling back to smart heuristic:", e)
+            print("Gemini API call failed, falling back to smart context heuristic:", e)
 
-    # Heuristic / Chapter fallback:
+    # Curated contextual hooks for up to 10 clips per genre
+    c_up = (creator or "CARRY").upper()[:12]
+    HOOK_PACKS = {
+        "funny_roast": [
+            {"tag": "SAVAGE ROAST", "t1": f"{c_up}'S SAVAGE ROAST! 😂", "t2": "HE DID NOT HOLD BACK! 🔥", "sub": "Funniest Reaction Moment"},
+            {"tag": "COMEDY GOLD", "t1": "UNSTOPPABLE LAUGHTER! 🤣", "t2": "BHAI NE SYSTEM HILA DIYA 💀", "sub": "Pure Comedy Scene"},
+            {"tag": "EPIC FAIL", "t1": "INSTANT REGRET MOMENT! 😭", "t2": "HE WAS NOT READY FOR THIS! 😂", "sub": "Hilarious Twist"},
+            {"tag": "SAVAGE MODE", "t1": "ULTRA SAVAGE COMEBACK! 💀", "t2": "NOBODY SAW THIS COMING! 🔥", "sub": "Roast Breakdown"},
+            {"tag": "PURE CHAOS", "t1": "PURE COMEDY CHAOS! 🤣", "t2": "HAS HAS KE BURA HAAL! 😭", "sub": "Non Stop Laughs"},
+            {"tag": "BEAST MODE", "t1": "HE WENT FULL BEAST MODE! 💀", "t2": "CRAZIEST REACTION EVER! 🔥", "sub": "Wild Gaming & Roast"},
+            {"tag": "MEME LEVEL", "t1": "THE ULTIMATE MEME SCENE! 😂", "t2": "WAIT FOR THE PUNCHLINE! 🤣", "sub": "Legendary Dialogue"},
+            {"tag": "BEST OF BEST", "t1": "CLIMAX PE DHAMAKA! 💥", "t2": "WATCH TILL THE VERY END! 😱", "sub": "Final Shocking Scene"},
+            {"tag": "UNBELIEVABLE", "t1": "HOW DID HE SAY THAT?! 💀", "t2": "TOO FUNNY TO MISS! 🤣", "sub": "Unexpected Moment"},
+            {"tag": "VIRAL FINALE", "t1": "TOP MOMENT OF THE YEAR! 🔥", "t2": "SHARE THIS WITH FRIENDS! 😂", "sub": "Masterpiece Clip"}
+        ],
+        "motivational_emotional": [
+            {"tag": "GOLDEN WORDS", "t1": "LIFE CHANGING ADVICE! 🥺", "t2": "LISTEN CAREFULLY TO THIS! 💯", "sub": "Deep Life Reality"},
+            {"tag": "GOOSEBUMPS", "t1": "GOOSEBUMPS GUARANTEED! ⚡", "t2": "YEH BAAT DIL KO CHHU GAYI ❤️", "sub": "Heart Touching Truth"},
+            {"tag": "REALITY CHECK", "t1": "HARDEST TRUTH OF LIFE! 💔", "t2": "NOBODY WILL TELL YOU THIS 💯", "sub": "Eye Opening Lesson"},
+            {"tag": "NEVER GIVE UP", "t1": "NEVER GIVE UP IN LIFE! 🔥", "t2": "STRUGGLE TO SUCCESS STORY 🏆", "sub": "Inspiring Transformation"},
+            {"tag": "PURE EMOTION", "t1": "ROTE HUE BHI MUSKURAOGE! 😢", "t2": "DEEPEST EMOTIONAL SCENE ❤️", "sub": "Soul Touching Words"},
+            {"tag": "SUCCESS MINDSET", "t1": "APNE DUM PAR JEENA SIKHO! ⚡", "t2": "POWERFUL MINDSET 💎", "sub": "Life Lessons For You"},
+            {"tag": "TRUE LESSON", "t1": "KABHI DEPEND MAT HONA! 💔", "t2": "AANKHEN KHOL DENE WALI BAAT 👁️", "sub": "Crucial Advice"},
+            {"tag": "MASTERPIECE", "t1": "YEH SUN KAR RO DOGE! 🥺❤️", "t2": "MOST INSPIRING MOMENT EVER! 🌟", "sub": "Final Golden Words"},
+            {"tag": "DEEP WISDOM", "t1": "ZINDAGI KA KADWA SACH! 💯", "t2": "REMEMBER THIS FOREVER 🔥", "sub": "Powerful Realization"},
+            {"tag": "FINAL LESSON", "t1": "DON'T LOSE HOPE EVER! ⚡", "t2": "YOUR TIME WILL COME! 🏆", "sub": "Ultimate Motivation"}
+        ],
+        "gaming": [
+            {"tag": "GOD CLUTCH", "t1": "1V4 IMPOSSIBLE CLUTCH! 🔥", "t2": "GOD LEVEL GAMEPLAY! 🎮", "sub": "Pro Gamer Moment"},
+            {"tag": "HEADSHOT", "t1": "MOST INSANE HEADSHOT! 💀", "t2": "ENEMY HAD ZERO CHANCE! ⚡", "sub": "Clean Elimination"},
+            {"tag": "FUNNY GLITCH", "t1": "HE WAS NOT READY FOR THIS! 😱", "t2": "HILARIOUS GAMING MOMENT! 😂", "sub": "Epic Game Moment"},
+            {"tag": "GAMING RAGE", "t1": "ULTRA RAGE MOMENT! 😡💀", "t2": "KEYBOARD TOD DIYA BHAI! 🤣", "sub": "Streamer Goes Wild"},
+            {"tag": "SECRET EASTER", "t1": "NEW SECRET UNLOCKED! 🤯", "t2": "HIDDEN DETAIL IN GAME! 🔍", "sub": "Game Discovery"},
+            {"tag": "1 HP SURVIVOR", "t1": "SURVIVED ON 1 HP! 😱🔥", "t2": "HEARTBEAT 200 BPM! 💓", "sub": "Extreme Tension"},
+            {"tag": "BIG BRAIN", "t1": "IQ 999 GALAXY BRAIN PLAY! 🧠", "t2": "HE OUTSMARTED EVERYONE! 😂", "sub": "Pro Mindset"},
+            {"tag": "VICTORY ROYALE", "t1": "THE FINAL SHOWDOWN! 🏆", "t2": "WHAT AN INSANE FINISH! 💥", "sub": "Victory Moment"},
+            {"tag": "EPIC MOMENT", "t1": "UNBELIEVABLE MOVE! ⚡", "t2": "CRAZIEST PLAY OF THE MATCH! 🎮", "sub": "Highlight Reel"},
+            {"tag": "LEGENDARY", "t1": "TOP TIER GAMING MOMENT! 🌟", "t2": "LOOK AT THAT PRECISION! 🔥", "sub": "Master Gamer"}
+        ],
+        "podcast_interview": [
+            {"tag": "SHOCKING TRUTH", "t1": "SHOCKING TRUTH REVEALED! 🤯", "t2": "RAW & UNFILTERED TALK 🎙️", "sub": "Untold Story"},
+            {"tag": "DARK REALITY", "t1": "DARK REALITY EXPOSED! 💀", "t2": "NOBODY TALKS ABOUT THIS 🤫", "sub": "Deep Revelation"},
+            {"tag": "CONFESSION", "t1": "HE BROKE HIS SILENCE! 🤐", "t2": "FIRST TIME ON CAMERA! 😱", "sub": "Shocking Statement"},
+            {"tag": "BIG REVEAL", "t1": "THE BIGGEST REALITY! 💥", "t2": "SACH DEKH KAR DANG REH JAOGE 👁️", "sub": "Eye Opening Fact"},
+            {"tag": "DEEP TALK", "t1": "WHY DO PEOPLE HIDE THIS?! 🤔", "t2": "UNBELIEVABLE CONVERSATION ⚡", "sub": "Important Truth"},
+            {"tag": "RAW STORY", "t1": "UNHEARD STORY OF STRUGGLE! 🥺", "t2": "BEFORE BECOMING FAMOUS... 💔", "sub": "Emotional Journey"},
+            {"tag": "BOLD OPINION", "t1": "UNFILTERED RAW OPINION! 🔥", "t2": "HE DID NOT FEAR ANYONE 💯", "sub": "Courageous Statement"},
+            {"tag": "VIRAL MOMENT", "t1": "THE MOST VIRAL ANSWER! 🤯", "t2": "THIS CHANGED EVERYTHING! ⚡", "sub": "Final Masterclip"},
+            {"tag": "EYE OPENER", "t1": "EVERYONE SHOULD HEAR THIS! 👂", "t2": "POWERFUL PERSPECTIVE 🌟", "sub": "Key Insight"},
+            {"tag": "FINAL WORDS", "t1": "DO NOT IGNORE THIS! 💥", "t2": "BEST PODCAST MOMENT 🎙️", "sub": "Unforgettable Talk"}
+        ],
+        "general_trending": [
+            {"tag": "VIRAL SCENE", "t1": f"{clean_title[:20].upper()}! 🔥", "t2": "WAIT FOR THE BEST PART! 😱", "sub": "Trending Moment"},
+            {"tag": "UNBELIEVABLE", "t1": "NOBODY SAW THIS COMING! 🤯", "t2": "DID YOU NOTICE THIS?! ⚡", "sub": "Shocking Detail"},
+            {"tag": "MUST WATCH", "t1": "MOST VIRAL MOMENT! 🍿", "t2": "CRAZY SCENE HAPPENED! 💥", "sub": "Top Highlight"},
+            {"tag": "TWIST ENDING", "t1": "WAIT FOR THE HUGE TWIST! 😱", "t2": "HE COULD NOT BELIEVE IT! 💀", "sub": "Unexpected Ending"},
+            {"tag": "TOP HIGHLIGHT", "t1": "BEST PART OF THE VIDEO! 🌟", "t2": "WATCH TILL THE VERY END! 🔥", "sub": "Highlight Segment"},
+            {"tag": "EPIC MOMENT", "t1": "THIS BROKE THE INTERNET! ⚡", "t2": "HUNDREDS ARE SHOCKED! 😲", "sub": "Viral Sensation"},
+            {"tag": "CRAZY SCENE", "t1": "CAN YOU BELIEVE THIS?! 🤯", "t2": "LOOK AT WHAT HAPPENED! 💥", "sub": "Unreal Clip"},
+            {"tag": "THE FINALE", "t1": "THE ULTIMATE CLIMAX! 🏆", "t2": "MOST TALKED ABOUT SCENE! 🔥", "sub": "Final Peak Moment"},
+            {"tag": "EXTRA VIRAL", "t1": "DON'T MISS THIS CLIP! 👀", "t2": "EVERYONE IS TALKING ABOUT IT! 💬", "sub": "Buzz Scene"},
+            {"tag": "EPIC FINISH", "t1": "THE CRAZIEST FINISH! 💥", "t2": "SHARE THIS WITH FRIENDS! 🔥", "sub": "Ultimate Ending"}
+        ]
+    }
+
+    hooks_list = HOOK_PACKS.get(genre, HOOK_PACKS["general_trending"])
     clips = []
-    if len(chapters) >= num_shorts:
+
+    # Calculate safe start times across the full video duration
+    if duration <= target_duration + 5:
+        # Very short video
+        for i in range(num_shorts):
+            h = hooks_list[i % len(hooks_list)]
+            clips.append({
+                "start_sec": 0,
+                "duration_sec": max(5, int(duration)),
+                "tag": h["tag"],
+                "title1": h["t1"],
+                "title2": h["t2"],
+                "subtitle": h["sub"],
+                "description": f"{h['t1']} - {clean_title} #Shorts #Viral"
+            })
+    elif len(chapters) >= num_shorts:
         step = max(1, len(chapters) // num_shorts)
-        for i in range(0, min(len(chapters), num_shorts * step), step):
-            ch = chapters[i]
+        for i in range(num_shorts):
+            idx = min(i * step, len(chapters) - 1)
+            ch = chapters[idx]
             st = ch["sec"]
             if st + target_duration > duration:
-                st = max(0, duration - target_duration - 5)
-            clean_t = sanitize_hook_text(ch["title"])
+                st = max(0, duration - target_duration - 2)
+            h = hooks_list[i % len(hooks_list)]
+            clean_ch = sanitize_hook_text(ch["title"])
             clips.append({
-                "start_sec": st,
+                "start_sec": int(st),
                 "duration_sec": target_duration,
-                "tag": "TRENDING SCENE",
-                "title1": clean_t if clean_t else "WAIT FOR THIS!",
-                "title2": "MUST WATCH MOMENT! 🔥",
-                "subtitle": "Trending Reaction Moment",
-                "description": f"Incredible moment! Wait for the twist at the end. #Shorts #Viral"
+                "tag": h["tag"],
+                "title1": clean_ch if len(clean_ch) > 4 else h["t1"],
+                "title2": h["t2"],
+                "subtitle": h["sub"],
+                "description": f"{clean_ch} - {clean_title} #Shorts #Viral"
             })
-            if len(clips) >= num_shorts:
-                break
     else:
-        # Divide into intervals
-        interval = (duration - target_duration - 10) / (num_shorts + 1)
-        for i in range(1, num_shorts + 1):
-            st = int(interval * i)
+        # Smart interval division across duration for num_shorts
+        available_time = max(0, duration - target_duration - 5)
+        interval = available_time / max(1, num_shorts)
+        for i in range(num_shorts):
+            st = int(interval * i + (interval * 0.15))
+            st = max(0, min(st, int(duration - target_duration - 2)))
+            h = hooks_list[i % len(hooks_list)]
             clips.append({
                 "start_sec": st,
                 "duration_sec": target_duration,
-                "tag": f"PART {i}",
-                "title1": "WAIT FOR THE END! 😱",
-                "title2": "VIRAL MOMENT 🔥",
-                "subtitle": "Trending Viral Short",
-                "description": "Shocking moment! Watch till the end! #Shorts #Viral"
+                "tag": h["tag"],
+                "title1": h["t1"],
+                "title2": h["t2"],
+                "subtitle": h["sub"],
+                "description": f"{h['t1']} - {clean_title} #Shorts #Viral"
             })
     return clips[:num_shorts]
 
-def generate_rich_clip_metadata(clip, main_video_title, gemini_api_key=None):
+def generate_rich_clip_metadata(clip, main_video_title, info=None, gemini_api_key=None):
     """
     Generates 3 Viral Title Options, Rich Description, and Pinned Comment.
-    NOTE: Sanitizes raw episode strings and official copyright names to avoid priority Content ID flags.
+    Context-aware for CarryMinati, Comedy, Motivational, Emotional, Gaming, Podcasts, etc.
     """
     title1 = clip.get("title1", "VIRAL MOMENT")
     title2 = clip.get("title2", "MUST WATCH")
     sub = clip.get("subtitle", "Trending Moment")
+
+    ctx = detect_video_genre_and_context(info if info else {"title": main_video_title})
+    genre = ctx["genre"]
+    creator = ctx["creator"] or "Creator"
+    clean_title = ctx["clean_title"] or main_video_title
 
     # 1. Try Gemini AI if API key is provided
     if gemini_api_key:
         try:
             from google import genai
             client = genai.Client(api_key=gemini_api_key)
-            prompt = f"""You are a top viral YouTube Shorts strategist.
-Generate metadata for this short video clip:
-Context Hook: {title1} - {title2}
-Context: {sub}
+            prompt = f"""You are a master viral YouTube Shorts strategist.
+Video Subject: {main_video_title}
+Creator / Channel: {creator}
+Detected Style/Tone: {genre}
+Short Clip Focus: {title1} - {title2}
+Clip Tag: {clip.get('tag', 'VIRAL')}
 
-CRITICAL COPYRIGHT NOTICE: Do not mention specific TV show episode numbers, exact song titles or official copyright strings in title options. Focus on curiosity hooks, shock value, and transformative commentary.
+CRITICAL INSTRUCTIONS:
+- Tailor the 3 Title Options and Description SPECIFICALLY to this video style:
+  * If Comedy/Roast (like CarryMinati): energetic, savage, laughing emojis (😂, 🤣, 💀), high-energy hooks.
+  * If Motivation/Emotional: deep, inspiring, heart-touching curiosity hooks (🥺, 💔, ❤️, 💯, ⚡).
+  * If Gaming: clutch, insane rage, pro gameplay hooks (🎮, 🔥, 💀).
+  * If Podcast/Interview: raw truth, untold confession, mystery reveal hooks (🎙️, 🤯, 🤫).
+- Avoid generic placeholders like "Wait For The Twist". Use the actual creator or subject context!
+- Keep each title under 65 chars with emojis and #Shorts.
 
 Generate JSON with:
 - "title_options": [
@@ -434,7 +601,7 @@ Generate JSON with:
     {{"type": "Curiosity Hook", "title": "Intriguing question headline with emojis and #Shorts (max 65 chars)"}},
     {{"type": "Hindi Mix", "title": "Desi Hindi / Hinglish hook title with emojis (max 65 chars)"}}
   ],
-- "description": "Full YouTube Shorts description with hook, background, subscribe CTA, 8-10 trending hashtags, and Section 107 Fair Use disclaimer.",
+- "description": "Full YouTube Shorts description with hook, breakdown summary, engagement question, CTA, 8-10 trending relevant hashtags, and Section 107 Fair Use disclaimer.",
 - "pinned_comment": "Engaging question for viewers to comment on"
 """
             res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -447,30 +614,122 @@ Generate JSON with:
         except Exception as e:
             print("Gemini metadata generation failed, using algorithmic fallback:", e)
 
-    # 2. Algorithmic High-Quality Fallback (Disinfected from raw copyright strings)
-    hook_clean = clean_text_for_font(title1).title()
-    if not hook_clean or len(hook_clean) < 4:
-        hook_clean = "Wait For The Twist"
+    # 2. Algorithmic Context-Aware Fallback (Specific to Creator & Genre)
+    subj = creator if (creator and creator.lower() not in ["creator", "uploaded video"]) else clean_title[:24]
 
-    opt1 = f"{hook_clean} - Shocking Moment! 😱🔥 #Shorts #Viral"
-    opt2 = f"Did You Notice THIS in The Video?! 🤯⚡ #Shorts"
-    opt3 = f"{hook_clean} Dekh Kar Sab Hairaan Ho Gaye! 😂 #Viral #Shorts"
+    if genre == "funny_roast":
+        opt1 = f"{subj} Ka Savage Roast! 😂🔥 Wait For The End! #Shorts #Viral"
+        opt2 = f"Bhai Ne To System Hila Ke Rakh Diya! 🤣💀 #Shorts #Comedy"
+        opt3 = f"{subj} Ka Yeh Scene Dekh Kar Hasi Nahi Rukegi! 😭 #CarryMinati #Funny"
+        desc = f"""{subj} - Pure comedy and savage moments! 😂🔥
 
-    desc = f"""{hook_clean} - You won't believe what happened here! 😱🔥
+Yeh wala scene dekh kar aapki hasi nahi rukegi! Watch till the very end for the funniest reaction.
 
-Watch the funniest and most thrilling breakdown of this viral scene that everyone is reacting to!
+Aapko is video me sabse comedy moment konsa laga? Comment me batayein! 👇
 
-What was your favorite moment in this clip? Tell us in the comments! 👇
+🔔 Subscribe for daily funny reactions, comedy roasts, and trending viral shorts!
 
-🔔 Subscribe for daily viral moments, comedy reactions, and trending shorts!
-
-#Shorts #Viral #Trending #Comedy #Entertainment #YouTubeShorts #MustWatch #EpicMoment #Reaction
+#Shorts #Viral #Comedy #Funny #CarryMinati #Roast #LMAO #TrendingShorts #Entertainment #Meme
 
 ---
 ⚖️ Fair Use Disclaimer:
 This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Is clip me sabse funny dialogue konsa laga? 🤣👇 Comment karein!"
 
-    pinned = "Aapko is scene me sabse zyada kya pasand aaya? Comment me batayein! 👇"
+    elif genre == "motivational_emotional":
+        opt1 = f"Life Changing Words! 🥺💔 Goosebumps Guaranteed ⚡ #Shorts #Motivation"
+        opt2 = f"Yeh Baat Har Kisi Ko Samajh Nahi Aayegi... 💯❤️ #LifeLessons"
+        opt3 = f"{subj} Ki Yeh Seekh Sun Kar Aankhon Me Aansu Aa Jayenge 😢 #Inspirational"
+        desc = f"""{clean_title} - Words that touch your soul! 🥺❤️
+
+A life-changing perspective that everyone needs to hear today. Remember, your struggle will define your success.
+
+Kya aap is baat se sehmat hain? Apne vichar comment box me zaroor share karein! 👇
+
+🔔 Subscribe for daily life motivation, inspiring lessons, and deep wisdom!
+
+#Shorts #Viral #Motivation #Inspirational #LifeLessons #Emotional #Success #Mindset #Quotes #TrueWords
+
+---
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Kya aap is baat se sehmat hain? Apni rai comment me zaroor batayein ❤️👇"
+
+    elif genre == "gaming":
+        opt1 = f"1v4 Impossible Clutch Moment! 🔥🎮 God Level Gameplay #Shorts"
+        opt2 = f"{subj} - Most Insane Reaction Ever! 😱💀 #Gaming #Viral"
+        opt3 = f"Enemy Team Ki Dhajjiyan Uda Di! 🤣💥 #Shorts #GamingClips"
+        desc = f"""{clean_title} - Insane gameplay highlights! 🎮🔥
+
+Look at that precision, clutch decision making, and unbelievable finish!
+
+Kya aap aisi situation me clutch nikaal pate? Yes ya No me answer dein! 👇
+
+🔔 Subscribe for pro gaming clutches, funny gaming moments, and live highlights!
+
+#Shorts #Gaming #Gameplay #Clutch #ProGamer #GTA #BGMI #GamingHighlights #Viral
+
+---
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Kya aap aisi situation me clutch nikaal sakte the? Yes or No? 🎮👇"
+
+    elif genre == "podcast_interview":
+        opt1 = f"Shocking Truth Revealed In Podcast! 🤯🎙️ #Shorts #Viral"
+        opt2 = f"{subj} - Unhone Yeh Baat National Media Par Bol Di?! 😱 #RealTalk"
+        opt3 = f"Dark Reality That Nobody Talks About! 💀🤫 #Podcast #Exposed"
+        desc = f"""{clean_title} - Untold reality and eye-opening revelation! 🎙️🤯
+
+A deep and unfiltered conversation about what really happens behind closed doors.
+
+Kya aap inki baat se agree karte hain? Sach batana! 👇
+
+🔔 Subscribe for unfiltered podcast highlights, truth revelations, and deep conversations!
+
+#Shorts #Podcast #Interview #RealTalk #Truth #Exposed #UntoldStory #Trending
+
+---
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Kya aap inki baat se agree karte hain? Sach batana! 🎙️👇"
+
+    elif genre == "horror_mystery":
+        opt1 = f"Real Ghost Caught On Camera?! 😱👻 #Shorts #Scary"
+        opt2 = f"Wait For What Happened At 3:00 AM... 💀😨 #Horror #Viral"
+        opt3 = f"Is Video Ko Raat Me Akele Mat Dekhna! 😭⚡ #Mystery #Creepy"
+        desc = f"""{clean_title} - Chilling paranormal mystery! 👻😱
+
+Notice the strange anomaly at the end of this clip. Do not watch alone with headphones!
+
+Did you spot anything unusual? Tell us in the comments! 👇
+
+#Shorts #Horror #Scary #Ghost #Paranormal #Mystery #Creepy #ViralShorts
+
+---
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Aapko kya laga, kya yeh sach me paranormal tha? 😱👇"
+
+    else:
+        # General Trending (using clean subject)
+        hook_clean = clean_text_for_font(title1).title() if title1 else clean_title[:24]
+        opt1 = f"{subj[:26]} - Most Insane Scene! 😱🔥 #Shorts #Viral"
+        opt2 = f"Did You Notice THIS in The Video?! 🤯⚡ #Shorts #Trending"
+        opt3 = f"{subj[:24]} Dekh Kar Sab Hairaan Ho Gaye! 💥🍿 #Viral #Shorts"
+        desc = f"""{clean_title} - You won't believe what happened here! 😱🔥
+
+Watch the most viral and thrilling breakdown of this trending scene that everyone is talking about!
+
+What was your favorite moment in this clip? Tell us in the comments! 👇
+
+🔔 Subscribe for daily viral moments, commentary reactions, and trending shorts!
+
+#Shorts #Viral #Trending #Entertainment #YouTubeShorts #MustWatch #EpicMoment #TrendingNow
+
+---
+⚖️ Fair Use Disclaimer:
+This video is transformative commentary, review, and fan analysis created under Section 107 of the Copyright Act 1976 (Fair Use). All rights belong to their respective copyright holders."""
+        pinned = "Aapko is video me sabse best part konsa laga? Comment me batayein! 👇"
 
     return {
         "title_options": [
